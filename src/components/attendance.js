@@ -132,7 +132,10 @@ const AttendanceTracker = () => {
         setIsProcessingImage(true);
         try {
             const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+            const model = genAI.getGenerativeModel({ 
+                model: "gemini-1.5-pro",
+                generationConfig: { responseMimeType: "application/json" }
+            });
 
             const reader = new FileReader();
             reader.readAsDataURL(file);
@@ -156,7 +159,15 @@ const AttendanceTracker = () => {
                     ]);
                     
                     const text = result.response.text();
+                    
+                    // Improved JSON extraction just in case
                     let jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const startIndex = jsonStr.indexOf('[');
+                    const endIndex = jsonStr.lastIndexOf(']');
+                    if (startIndex !== -1 && endIndex !== -1) {
+                        jsonStr = jsonStr.substring(startIndex, endIndex + 1);
+                    }
+                    
                     const parsedData = JSON.parse(jsonStr);
 
                     // Map parsed data to current attendanceData
@@ -184,7 +195,7 @@ const AttendanceTracker = () => {
                     alert('Timesheet processed successfully!');
                 } catch (apiError) {
                     console.error("Gemini API Error:", apiError);
-                    alert('Failed to parse image with AI. Please check your API key and try again.');
+                    alert(`Failed to parse image with AI. Error: ${apiError.message || 'Unknown error. Check console.'}`);
                 } finally {
                     setIsProcessingImage(false);
                     if (fileInputRef.current) fileInputRef.current.value = '';
