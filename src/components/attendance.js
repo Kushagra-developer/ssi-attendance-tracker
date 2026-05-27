@@ -197,7 +197,7 @@ const AttendanceTracker = () => {
             updateMonthRecord(selectedEmployee, year, month + 1, newMonthDays, 8500);
         }
         localStorage.setItem('last_selected_employee_id', selectedEmployee);
-
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedEmployee, currentDate, isLoading]);
 
 
