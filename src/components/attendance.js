@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { ArrowLeft, ArrowRight, Calendar, User, Plus, Save, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { ArrowLeft, ArrowRight, Calendar, User, Plus, Save, Trash2, Upload, Settings, X, Loader2 } from 'lucide-react';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const timeToMinutes = (timeStr) => {
     if (!timeStr || timeStr.trim() === '' || timeStr.toUpperCase() === 'H') return NaN;
@@ -108,6 +109,93 @@ const AttendanceTracker = () => {
     const [newEmployeeName, setNewEmployeeName] = useState('');
 
     const [allAttendanceRecords, setAllAttendanceRecords] = useState({});
+
+    // OCR & AI State
+    const [isProcessingImage, setIsProcessingImage] = useState(false);
+    const [showSettings, setShowSettings] = useState(false);
+    const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_api_key') || '');
+    const fileInputRef = useRef(null);
+
+    const handleSaveApiKey = (key) => {
+        setApiKey(key);
+        localStorage.setItem('gemini_api_key', key);
+        setShowSettings(false);
+    };
+
+    const processImage = async (file) => {
+        if (!apiKey) {
+            alert('Please set your Gemini API Key in the settings first.');
+            setShowSettings(true);
+            return;
+        }
+
+        setIsProcessingImage(true);
+        try {
+            const genAI = new GoogleGenerativeAI(apiKey);
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = async () => {
+                const base64Data = reader.result.split(',')[1];
+                
+                const prompt = `You are an expert at extracting attendance data from handwritten timesheets. 
+                Look at this image. Extract the In Time and Out Time for each date. 
+                Return ONLY a JSON array of objects with keys: "date" (YYYY-MM-DD format based on the day and month), "inTime" (HH:MM format, 24-hour or blank), "outTime" (HH:MM format, 24-hour or blank).
+                If a cell is blank or unreadable, leave it as an empty string. The year is ${currentDate.getFullYear()}.`;
+
+                try {
+                    const result = await model.generateContent([
+                        prompt,
+                        {
+                            inlineData: {
+                                data: base64Data,
+                                mimeType: file.type
+                            }
+                        }
+                    ]);
+                    
+                    const text = result.response.text();
+                    let jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const parsedData = JSON.parse(jsonStr);
+
+                    // Map parsed data to current attendanceData
+                    const updatedData = [...attendanceData];
+                    parsedData.forEach(parsedRow => {
+                        const index = updatedData.findIndex(d => d.date === parsedRow.date);
+                        if (index !== -1) {
+                            updatedData[index].inTime = parsedRow.inTime || '';
+                            updatedData[index].outTime = parsedRow.outTime || '';
+                            
+                            // Recalculate OT and Less Hours
+                            const { overTime, lessHours } = calculateWorkDetails(updatedData[index].inTime, updatedData[index].outTime, updatedData[index].date);
+                            updatedData[index].overTime = overTime;
+                            updatedData[index].lessHours = lessHours;
+                        }
+                    });
+
+                    setAttendanceData(updatedData);
+                    
+                    // Auto save to local storage
+                    const year = currentDate.getFullYear();
+                    const month = currentDate.getMonth() + 1;
+                    updateMonthRecord(selectedEmployee, year, month, updatedData, baseSalary);
+
+                    alert('Timesheet processed successfully!');
+                } catch (apiError) {
+                    console.error("Gemini API Error:", apiError);
+                    alert('Failed to parse image with AI. Please check your API key and try again.');
+                } finally {
+                    setIsProcessingImage(false);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                }
+            };
+        } catch (error) {
+            console.error("Error processing file:", error);
+            setIsProcessingImage(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
 
     useEffect(() => {
         try {
@@ -341,6 +429,10 @@ const AttendanceTracker = () => {
                     setNewEmployeeName={setNewEmployeeName}
                     handleAddEmployee={handleAddEmployee}
                     handleDeleteEmployee={handleDeleteEmployee}
+                    fileInputRef={fileInputRef}
+                    processImage={processImage}
+                    isProcessingImage={isProcessingImage}
+                    setShowSettings={setShowSettings}
                 />
             </div>
             {isLoading ? (
@@ -366,6 +458,32 @@ const AttendanceTracker = () => {
                 </div>
             )}
             <Footer />
+
+            {/* API Key Settings Modal */}
+            {showSettings && (
+                <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 relative">
+                        <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors">
+                            <X className="w-5 h-5" />
+                        </button>
+                        <h3 className="text-xl font-bold text-slate-800 mb-4">AI Vision Settings</h3>
+                        <p className="text-sm text-slate-500 mb-4">Enter your Google Gemini API Key to enable automatic handwritten timesheet parsing. The key is securely stored in your browser's local storage.</p>
+                        <input
+                            type="password"
+                            value={apiKey}
+                            onChange={(e) => setApiKey(e.target.value)}
+                            placeholder="AIzaSy..."
+                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-4"
+                        />
+                        <button
+                            onClick={() => handleSaveApiKey(apiKey)}
+                            className="w-full py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition-colors"
+                        >
+                            Save API Key
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -378,7 +496,7 @@ const Header = () => (
     </header>
 );
 
-const Controls = ({ employees, selectedEmployee, setSelectedEmployee, currentDate, handleMonthChange, handleSave, newEmployeeName, setNewEmployeeName, handleAddEmployee, handleDeleteEmployee }) => (
+const Controls = ({ employees, selectedEmployee, setSelectedEmployee, currentDate, handleMonthChange, handleSave, newEmployeeName, setNewEmployeeName, handleAddEmployee, handleDeleteEmployee, fileInputRef, processImage, isProcessingImage, setShowSettings }) => (
     <div className="flex flex-col lg:flex-row gap-6 justify-between items-center">
         <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto items-center">
             <div className="flex items-center gap-2 w-full sm:w-auto relative group">
@@ -427,6 +545,16 @@ const Controls = ({ employees, selectedEmployee, setSelectedEmployee, currentDat
         </div>
 
         <div className="flex items-center gap-3 w-full lg:w-auto justify-end mt-4 lg:mt-0">
+             <button onClick={() => setShowSettings(true)} className="p-2.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-transparent hover:border-indigo-100" title="AI Settings">
+                 <Settings className="w-5 h-5" />
+             </button>
+             <div className="relative">
+                 <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && processImage(e.target.files[0])} disabled={!selectedEmployee || isProcessingImage} />
+                 <button onClick={() => fileInputRef.current?.click()} disabled={!selectedEmployee || isProcessingImage} className="flex items-center gap-2 px-4 py-2.5 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors font-medium disabled:opacity-50 text-sm">
+                     {isProcessingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                     <span className="hidden sm:inline">{isProcessingImage ? 'Parsing...' : 'Upload Sheet'}</span>
+                 </button>
+             </div>
              <button
                 onClick={handleDeleteEmployee}
                 className="flex items-center gap-2 px-4 py-2.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed text-sm"
@@ -521,11 +649,9 @@ const Summary = ({ data, baseSalary, setBaseSalary, currentDate }) => {
             const isHolidayMarked = d.inTime.toUpperCase() === 'H' || d.outTime.toUpperCase() === 'H';
 
 
-            if (isSunday && !isHolidayMarked) {
+            if (hasValidTimeEntry || isHolidayMarked) {
                 presentDays++;
-            } else if (!isSunday && hasValidTimeEntry) {
-                presentDays++;
-            } else if (!isSunday && !hasValidTimeEntry && !isHolidayMarked) {
+            } else {
                 absentDays++;
             }
 
