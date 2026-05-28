@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ArrowLeft, ArrowRight, Calendar, User, Plus, Save, Trash2, Upload, Settings, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Calendar, User, Plus, Save, Trash2, Upload, Settings, X, Loader2, Download } from 'lucide-react';
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import * as XLSX from 'xlsx';
 
 const timeToMinutes = (timeStr) => {
     if (!timeStr || timeStr.trim() === '' || timeStr.toUpperCase() === 'H') return NaN;
@@ -424,6 +425,47 @@ const AttendanceTracker = () => {
         alert(`Employee "${employeeToDelete.name}" and all associated data deleted successfully!`);
     };
 
+    const exportToExcel = () => {
+        if (!selectedEmployee || attendanceData.length === 0) {
+            alert('No data to export. Please select an employee first.');
+            return;
+        }
+        const emp = employees.find(e => e.id === selectedEmployee);
+        const empName = emp ? emp.name : 'Employee';
+        const monthName = currentDate.toLocaleString('default', { month: 'long' });
+        const year = currentDate.getFullYear();
+
+        // Build rows for the sheet
+        const rows = attendanceData.map(row => {
+            const dayDate = new Date(row.date + 'T00:00:00Z');
+            const isSunday = dayDate.getUTCDay() === 0;
+            return {
+                'Date': new Date(row.date + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) + (isSunday ? ' (Sun)' : ''),
+                'In Time': row.inTime || '',
+                'Out Time': row.outTime || '',
+                'Less Hours': row.lessHours ? parseFloat(row.lessHours).toFixed(2) : '0.00',
+                'Over Time': row.overTime ? parseFloat(row.overTime).toFixed(2) : '0.00',
+                'Remarks': row.remarks || ''
+            };
+        });
+
+        const ws = XLSX.utils.json_to_sheet(rows);
+
+        // Set column widths
+        ws['!cols'] = [
+            { wch: 18 }, // Date
+            { wch: 10 }, // In Time
+            { wch: 10 }, // Out Time
+            { wch: 12 }, // Less Hours
+            { wch: 12 }, // Over Time
+            { wch: 20 }, // Remarks
+        ];
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, `${monthName} ${year}`);
+        XLSX.writeFile(wb, `${empName}_Attendance_${monthName}_${year}.xlsx`);
+    };
+
 
     return (
         <div className="w-full max-w-7xl mx-auto p-4 md:p-6 lg:p-8 flex flex-col gap-6">
@@ -444,6 +486,7 @@ const AttendanceTracker = () => {
                     processImage={processImage}
                     isProcessingImage={isProcessingImage}
                     setShowSettings={setShowSettings}
+                    exportToExcel={exportToExcel}
                 />
             </div>
             {isLoading ? (
@@ -507,7 +550,7 @@ const Header = () => (
     </header>
 );
 
-const Controls = ({ employees, selectedEmployee, setSelectedEmployee, currentDate, handleMonthChange, handleSave, newEmployeeName, setNewEmployeeName, handleAddEmployee, handleDeleteEmployee, fileInputRef, processImage, isProcessingImage, setShowSettings }) => (
+const Controls = ({ employees, selectedEmployee, setSelectedEmployee, currentDate, handleMonthChange, handleSave, newEmployeeName, setNewEmployeeName, handleAddEmployee, handleDeleteEmployee, fileInputRef, processImage, isProcessingImage, setShowSettings, exportToExcel }) => (
     <div className="flex flex-col lg:flex-row gap-6 justify-between items-center">
         <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto items-center">
             <div className="flex items-center gap-2 w-full sm:w-auto relative group">
@@ -561,11 +604,20 @@ const Controls = ({ employees, selectedEmployee, setSelectedEmployee, currentDat
              </button>
              <div className="relative">
                  <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && processImage(e.target.files[0])} disabled={!selectedEmployee || isProcessingImage} />
-                 <button onClick={() => fileInputRef.current?.click()} disabled={!selectedEmployee || isProcessingImage} className="flex items-center gap-2 px-4 py-2.5 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors font-medium disabled:opacity-50 text-sm">
+                 <button onClick={() => fileInputRef.current?.click()} disabled={!selectedEmployee || isProcessingImage} className="flex items-center gap-2 px-4 py-2.5 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed text-sm">
                      {isProcessingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                      <span className="hidden sm:inline">{isProcessingImage ? 'Parsing...' : 'Upload Sheet'}</span>
                  </button>
              </div>
+             <button
+                onClick={exportToExcel}
+                disabled={!selectedEmployee}
+                className="flex items-center gap-2 px-4 py-2.5 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                title="Download as Excel"
+             >
+                 <Download className="w-4 h-4" />
+                 <span className="hidden sm:inline">Download Excel</span>
+             </button>
              <button
                 onClick={handleDeleteEmployee}
                 className="flex items-center gap-2 px-4 py-2.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed text-sm"
