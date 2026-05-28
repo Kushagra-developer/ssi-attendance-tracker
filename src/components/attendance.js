@@ -705,9 +705,6 @@ const Summary = ({ data, baseSalary, setBaseSalary, currentDate }) => {
 
 
         data.forEach(d => {
-            const day = new Date(d.date + 'T00:00:00Z').getUTCDay();
-            const isSunday = day === 0;
-
             const hasValidTimeEntry = d.inTime && d.inTime.trim() !== '' && d.inTime.toUpperCase() !== 'H';
             const isHolidayMarked = d.inTime.toUpperCase() === 'H' || d.outTime.toUpperCase() === 'H';
 
